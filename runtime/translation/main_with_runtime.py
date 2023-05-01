@@ -20,6 +20,7 @@ import torch.optim
 import torch.utils.data
 import torch.utils.data.distributed
 import torchvision.transforms as transforms
+import numpy as np
 
 sys.path.append("..")
 import runtime
@@ -348,6 +349,7 @@ def train(train_loader, r, optimizer, epoch):
     losses = AverageMeter()
     top1 = AverageMeter()
     top5 = AverageMeter()
+    csv_records = [] ### csv records (loss, avg_loss, memory, time etc)
 
     # switch to train mode
     n = r.num_iterations(loader_size=len(train_loader))
@@ -389,23 +391,28 @@ def train(train_loader, r, optimizer, epoch):
             full_epoch_time = (epoch_time / float(i+1)) * float(n)
 
             if i % args.print_freq == 0:
-                print('Epoch: [{0}][{1}/{2}]\t'
+                memory = float(torch.cuda.memory_allocated()) / 10**9
+                cached_memory = float(torch.cuda.memory_cached()) / 10**9
+                print('STG{3})\tEpoch: [{0}][{1}/{2}]\t'
                       'Time: {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                       'Epoch time [hr]: {epoch_time:.3f} ({full_epoch_time:.3f})\t'
                       'Memory: {memory:.3f} ({cached_memory:.3f})\t'
                       'Loss: {loss.val:.4f} ({loss.avg:.4f})\t'.format(
-                       epoch, i, n, batch_time=batch_time,
+                       epoch, i, n, args.stage, batch_time=batch_time,
                        epoch_time=epoch_time, full_epoch_time=full_epoch_time,
                        loss=losses, # top1=top1, top5=top5,
-                       memory=(float(torch.cuda.memory_allocated()) / 10**9),
-                       cached_memory=(float(torch.cuda.memory_cached()) / 10**9)))
+                       memory=memory, cached_memory=cached_memory))
                 import sys; sys.stdout.flush()
+                csv_records.append([i, batch_time.val, batch_time.avg, epoch_time, full_epoch_time, 
+                                    memory, cached_memory, losses.val, losses.avg])
         else:
             if i % args.print_freq == 0:
-                print('Epoch: [{0}][{1}/{2}]\tMemory: {memory:.3f} ({cached_memory:.3f})'.format(
-                       epoch, i, n, memory=(float(torch.cuda.memory_allocated()) / 10**9),
-                       cached_memory=(float(torch.cuda.memory_cached()) / 10**9)))
+                memory = float(torch.cuda.memory_allocated()) / 10**9
+                cached_memory = float(torch.cuda.memory_cached()) / 10**9
+                print('STG{3})\tEpoch: [{0}][{1}/{2}]\tMemory: {memory:.3f} ({cached_memory:.3f})'.format(
+                       epoch, i, n, args.stage, memory=memory, cached_memory=cached_memory))
                 import sys; sys.stdout.flush()
+                csv_records.append([i, memory, cached_memory])
 
         # perform backward pass
         if args.fp16:
@@ -425,6 +432,9 @@ def train(train_loader, r, optimizer, epoch):
         r.run_backward()
         optimizer.load_new_params()
         optimizer.step()
+
+    if args.checkpoint_dir:
+        save_metrics(csv_records, args.checkpoint_dir, args.stage, epoch)
 
     # wait for all helper threads to complete
     r.wait()
@@ -513,6 +523,14 @@ def save_checkpoint(state, checkpoint_dir, stage, epoch):
     checkpoint_file_path = os.path.join(checkpoint_dir, "checkpoint.%d.pth.tar.epoch.%d" % (stage, epoch))
     torch.save(state, checkpoint_file_path)
     print("Saved checkpoint to %s" % checkpoint_file_path)
+
+
+def save_metrics(csv_records, dir_path, stage, epoch):
+    assert os.path.isdir(dir_path)
+    csv_records_path = os.path.join(dir_path, "metrics.%dstg.epoch.%d" % (stage, epoch))
+    csv_records = np.array(csv_records)
+    np.save(csv_records, csv_records)
+    print("Saved metrics to %s" % csv_records_path)
 
 
 class AverageMeter(object):
