@@ -16,7 +16,7 @@ import torch.nn as nn
 import torch.nn.parallel
 import torch.backends.cudnn as cudnn
 import torch.distributed as dist
-import torch.optim
+import torch.optim as optim
 import torch.utils.data
 import torch.utils.data.distributed
 import torchvision.transforms as transforms
@@ -108,6 +108,10 @@ parser.add_argument('--recompute', action='store_true',
 # by not applying updates every minibatch.
 parser.add_argument('--macrobatch', action='store_true',
                     help='Macrobatch updates to save memory')
+
+# Not to use weight stashing
+parser.add_argument('--without_stashing', action='store_true',
+                    help='Not to use weight stashing')
 
 best_prec1 = 0
 
@@ -250,13 +254,19 @@ def main():
 
     # TODO: make this configurable by args
     use_adam_optimizer = True
-    if use_adam_optimizer:
+    if use_adam_optimizer and args.without_stashing:
+        optimizer = optim.Adam(r.master_parameters, lr = args.lr, betas = (0.9, 0.999), 
+            weight_decay = args.weight_decay)
+    elif use_adam_optimizer:
         optimizer = adam.AdamWithWeightStashing(
             modules=r.modules(), master_parameters=r.master_parameters,
             model_parameters=r.model_parameters, loss_scale=args.loss_scale,
             num_versions=num_versions, lr=args.lr, betas=(0.9,0.999),
             weight_decay=args.weight_decay, verbose_freq=args.verbose_frequency,
             macrobatch=args.macrobatch)
+    elif args.without_stashing:
+        optimizer = optim.SGD(r.master_parameters, lr = args.lr, 
+            momentum = args.momentum, weight_decay = args.weight_decay)
     else:
         optimizer = sgd.SGDWithWeightStashing(
             modules=r.modules(), master_parameters=r.master_parameters,
@@ -419,18 +429,25 @@ def train(train_loader, r, optimizer, epoch):
             r.zero_grad()
         else:
             optimizer.zero_grad()
-        optimizer.load_old_params()
+
+        if not args.without_stashing:
+            optimizer.load_old_params()
 
         r.run_backward()
-        optimizer.load_new_params()
+
+        if not args.without_stashing:
+            optimizer.load_new_params()
+
         optimizer.step()
 
     # finish remaining backward passes
     for i in range(num_warmup_minibatches):
         optimizer.zero_grad()
-        optimizer.load_old_params()
+        if not args.without_stashing:
+            optimizer.load_old_params()
         r.run_backward()
-        optimizer.load_new_params()
+        if not args.without_stashing:
+            optimizer.load_new_params()
         optimizer.step()
 
     if args.checkpoint_dir:
