@@ -38,7 +38,8 @@ LR_WARMUP = 'lr_warmup'
 SYNTHETIC_DATA = 'synthetic_data'
 RECOMPUTE = 'recompute'
 MACROBATCH = 'macrobatch'
-
+NUM_MINIBATCH = 'num_minibatches'
+WITHOUT_STASHING = 'without_stashing'
 
 '''
 Remaining TODOs:
@@ -82,6 +83,8 @@ if __name__ == "__main__":
                         help='list of directories to mount')
     parser.add_argument('--quiet', action='store_true',
                         help='quiet execution')
+    parser.add_argument('--name', default='test', type=str,
+                        help='name of your docker container')
     args = parser.parse_args()
 
     sys.stdout.write('Using configuration path {0}\n'.format(args.config_file))
@@ -269,6 +272,12 @@ if __name__ == "__main__":
     if MACROBATCH in configurations and configurations[MACROBATCH]:
         runtime_cmd_list.append('--macrobatch')
 
+    if NUM_MINIBATCH in configurations:
+        runtime_cmd_list.append('--num_minibatches %d' % configurations[NUM_MINIBATCH])
+    
+    if WITHOUT_STASHING in configurations and configurations[WITHOUT_STASHING]:
+        runtime_cmd_list.append('--without_stashing')
+
     common_runtime_cmd = " ".join(runtime_cmd_list)
 
     # If launching in a single container per node, use launch utility to spawn
@@ -277,10 +286,11 @@ if __name__ == "__main__":
         all_runtime_cmds = []
         for node_rank, (node_ip, workers) in \
             enumerate(nodes_to_workers_mapping.items()):
-            docker_cmd = 'nvidia-docker run -d %(mount_directories)s ' \
+            docker_cmd = 'docker run --gpus all --name %(name)s -d %(mount_directories)s ' \
                          '--net=host ' \
                          '--shm-size 16g %(container)s /bin/bash -c' % {
                 "container": configurations[CONTAINER],
+                "name": args.name,
                 "mount_directories":
                     " ".join(["-v %s:%s" % (x, x)
                               for x in args.mount_directories])
@@ -321,10 +331,11 @@ if __name__ == "__main__":
                 subprocess.check_output(launch_cmd, shell=True)
     else:
         for rank, worker in enumerate(workers):
-            docker_cmd = 'nvidia-docker run -d %(mount_directories)s ' \
+            docker_cmd = 'docker run --gpus all --name %(name)s -d %(mount_directories)s ' \
                          '--net=host ' \
                          '--ipc=host %(container)s /bin/bash -c' % {
                 "container": configurations[CONTAINER],
+                "name": "%s-%s" % (args.name, rank),
                 "mount_directories":
                     " ".join(["-v %s:%s" % (x, x)
                               for x in args.mount_directories])
