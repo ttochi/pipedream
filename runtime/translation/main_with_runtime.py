@@ -413,7 +413,7 @@ def train(train_loader, r, optimizer, epoch):
                        loss=losses, # top1=top1, top5=top5,
                        memory=memory, cached_memory=cached_memory))
                 import sys; sys.stdout.flush()
-                csv_records.append([i, batch_time.val, batch_time.avg, epoch_time, full_epoch_time, 
+                csv_records.append([epoch, i, batch_time.val, batch_time.avg, epoch_time, full_epoch_time, 
                                     memory, cached_memory, losses.val, losses.avg])
         else:
             if i % args.print_freq == 0:
@@ -422,7 +422,7 @@ def train(train_loader, r, optimizer, epoch):
                 print('STG{3})\tEpoch: [{0}][{1}/{2}]\tMemory: {memory:.3f} ({cached_memory:.3f})'.format(
                        epoch, i, n, args.stage, memory=memory, cached_memory=cached_memory))
                 import sys; sys.stdout.flush()
-                csv_records.append([i, memory, cached_memory])
+                csv_records.append([epoch, i, memory, cached_memory])
 
         # perform backward pass
         if args.fp16:
@@ -546,7 +546,7 @@ def save_metrics(csv_records, dir_path, stage, epoch):
     assert os.path.isdir(dir_path)
     csv_records_path = os.path.join(dir_path, "metrics.%dstg.epoch.%d" % (stage, epoch))
     csv_records = np.array(csv_records)
-    np.save(csv_records, csv_records)
+    np.savetxt(csv_records_path, csv_records, delimiter=',')
     print("Saved metrics to %s" % csv_records_path)
 
 
